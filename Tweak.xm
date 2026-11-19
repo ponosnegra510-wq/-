@@ -13,6 +13,7 @@
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
 #import <AudioToolbox/AudioToolbox.h>
+#import <objc/message.h>
 
 #pragma mark - Конфигурация
 
@@ -712,13 +713,23 @@ static void FLHideLock(BOOL unlockDevice) {
             return;
         }
 
-        SBLockScreenManager *manager = [SBLockScreenManager sharedInstance];
+        Class managerClass = NSClassFromString(@"SBLockScreenManager");
+        if (!managerClass) {
+            return;
+        }
+
+        id manager = ((id (*)(id, SEL))objc_msgSend)((id)managerClass, @selector(sharedInstance));
         if (!manager) {
             return;
         }
 
-        if ([manager isUILocked]) {
-            [manager lockScreenViewControllerRequestsUnlock];
+        BOOL stillLocked = YES;
+        if ([manager respondsToSelector:@selector(isUILocked)]) {
+            stillLocked = ((BOOL (*)(id, SEL))objc_msgSend)(manager, @selector(isUILocked));
+        }
+
+        if (stillLocked && [manager respondsToSelector:@selector(lockScreenViewControllerRequestsUnlock)]) {
+            ((void (*)(id, SEL))objc_msgSend)(manager, @selector(lockScreenViewControllerRequestsUnlock));
         }
     });
 }
