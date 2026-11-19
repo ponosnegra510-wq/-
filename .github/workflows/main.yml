@@ -1,0 +1,50 @@
+name: Build FakePass13
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install tools
+        run: brew install ldid xz
+
+      - name: Setup Theos
+        run: |
+          git clone --recursive https://github.com/theos/theos.git "$HOME/theos"
+          mkdir -p "$HOME/theos/sdks"
+          curl -L -o "$RUNNER_TEMP/sdks.tar.gz" https://github.com/theos/sdks/archive/master.tar.gz
+          tar -xzf "$RUNNER_TEMP/sdks.tar.gz" -C "$HOME/theos/sdks" --strip-components=1
+          echo "THEOS=$HOME/theos" >> "$GITHUB_ENV"
+          echo "$HOME/theos/bin" >> "$GITHUB_PATH"
+
+      - name: Find project
+        id: project
+        run: |
+          if [ -f Makefile ]; then
+            echo "dir=." >> "$GITHUB_OUTPUT"
+          elif [ -f FakePass13/Makefile ]; then
+            echo "dir=FakePass13" >> "$GITHUB_OUTPUT"
+          else
+            echo "Makefile not found in repo root or FakePass13/"
+            ls -la
+            exit 1
+          fi
+
+      - name: Build package
+        working-directory: ${{ steps.project.outputs.dir }}
+        run: |
+          make clean
+          make package FINALPACKAGE=1
+
+      - name: Upload .deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: FakePass13
+          path: ${{ steps.project.outputs.dir }}/packages/*.deb
+          if-no-files-found: error
