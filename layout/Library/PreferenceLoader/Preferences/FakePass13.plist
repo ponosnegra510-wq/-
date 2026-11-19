@@ -1,0 +1,8 @@
+{
+	entry = {
+		bundle = "FakePass13Prefs";
+		cell = PSLinkCell;
+		detail = "FakePass13RootListController";
+		label = "FakePass13";
+	};
+}

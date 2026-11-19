@@ -14,6 +14,7 @@
 #import <QuartzCore/QuartzCore.h>
 #import <AudioToolbox/AudioToolbox.h>
 #import <objc/message.h>
+#import <notify.h>
 
 #pragma mark - Конфигурация
 
@@ -21,10 +22,24 @@ static NSString *const FLConfigPath = @"/Library/Preferences/com.mell.fakepass13
 static NSString *const FLDefaultPasscode = @"1234";
 
 static NSDictionary *FLConfig(void) {
-    NSDictionary *config = [NSDictionary dictionaryWithContentsOfFile:FLConfigPath];
-    if (![config isKindOfClass:[NSDictionary class]]) {
-        return @{};
+    NSMutableDictionary *config = [NSMutableDictionary dictionary];
+
+    // старый вариант конфига (файл), чтобы ничего не потерялось
+    NSDictionary *legacy = [NSDictionary dictionaryWithContentsOfFile:@"/Library/Preferences/com.mell.fakepass13.plist"];
+    if ([legacy isKindOfClass:[NSDictionary class]]) {
+        [config addEntriesFromDictionary:legacy];
     }
+
+    // новый вариант — общий домен с панелью в Настройках
+    CFPreferencesAppSynchronize(CFSTR("com.mell.fakepass13"));
+    NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:@"com.mell.fakepass13"];
+    for (NSString *key in @[ @"passcode", @"enabled", @"lockOnRespring" ]) {
+        id value = [defaults objectForKey:key];
+        if (value != nil) {
+            config[key] = value;
+        }
+    }
+
     return config;
 }
 
@@ -48,10 +63,52 @@ static BOOL FLConfigBool(NSString *key, BOOL fallback) {
     return value ? [value boolValue] : fallback;
 }
 
+#pragma mark - Лог (для диагностики)
+
+static NSArray<NSString *> *FLLogPaths(void) {
+    return @[
+        @"/tmp/fakepass13.log",
+        @"/var/mobile/Library/Caches/fakepass13.log",
+        @"/var/mobile/Library/Preferences/fakepass13.log",
+        @"/var/mobile/Documents/fakepass13.log"
+    ];
+}
+
+static void FLLog(NSString *format, ...) {
+    va_list args;
+    va_start(args, format);
+    NSString *message = [[NSString alloc] initWithFormat:format arguments:args];
+    va_end(args);
+
+    NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+    formatter.dateFormat = @"HH:mm:ss";
+    NSString *line = [NSString stringWithFormat:@"%@  %@\n",
+                      [formatter stringFromDate:[NSDate date]], message];
+    NSData *data = [line dataUsingEncoding:NSUTF8StringEncoding];
+
+    for (NSString *path in FLLogPaths()) {
+        if ([[NSFileManager defaultManager] fileExistsAtPath:path]) {
+            NSFileHandle *handle = [NSFileHandle fileHandleForWritingAtPath:path];
+            if (handle) {
+                @try {
+                    [handle seekToEndOfFile];
+                    [handle writeData:data];
+                } @catch (NSException *exception) {
+                    // молча игнорируем
+                }
+                [handle closeFile];
+            }
+        } else {
+            [data writeToFile:path atomically:YES];
+        }
+    }
+}
+
 #pragma mark - Вспомогательные штуки
 
 static UIWindowScene *FLBestWindowScene(void) {
     UIWindowScene *fallback = nil;
+
     for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
         if (![scene isKindOfClass:[UIWindowScene class]]) {
             continue;
@@ -63,7 +120,16 @@ static UIWindowScene *FLBestWindowScene(void) {
             return (UIWindowScene *)scene;
         }
     }
-    return fallback;
+    if (fallback) {
+        return fallback;
+    }
+
+    for (UIWindow *window in [UIApplication sharedApplication].windows) {
+        if (window.windowScene) {
+            return window.windowScene;
+        }
+    }
+    return nil;
 }
 
 static void FLPlayKeySound(void) {
@@ -630,42 +696,44 @@ static void FLHapticSuccess(void) {
 - (BOOL)isUILocked;
 - (BOOL)isLockScreenVisible;
 - (void)lockScreenViewControllerRequestsUnlock;
+- (void)lockScreenViewControllerDidPresent;
 - (void)lockUIFromSource:(int)source withOptions:(id)options;
+- (void)lockUIFromSource:(int)source withOptions:(id)options completion:(id)completion;
+@end
+
+@interface SBBacklightController : NSObject
++ (instancetype)sharedInstance;
+- (void)_startFadeOutAnimationFromLockSource:(int)source;
 @end
 
 static UIWindow *gLockWindow = nil;
 static FLPasscodeViewController *gLockViewController = nil;
 static BOOL gFakeLocked = NO;
 static BOOL gShowing = NO;
-static int gShowAttempts = 0;
 
 static void FLHideLock(BOOL unlockDevice);
 
 static void FLShowLock(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
+        if (!FLConfigBool(@"enabled", YES)) {
+            FLLog(@"show: выключено в настройках");
+            return;
+        }
         if (gLockWindow || gShowing) {
+            FLLog(@"show: уже показано, пропускаем");
             return;
         }
 
         UIWindowScene *scene = FLBestWindowScene();
-        if (!scene) {
-            gShowAttempts += 1;
-            if (gShowAttempts < 15) {
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
-                               dispatch_get_main_queue(), ^{
-                    FLShowLock();
-                });
-            }
-            return;
-        }
-        gShowAttempts = 0;
+
         gShowing = YES;
 
         UIWindow *window = nil;
-        if (@available(iOS 13.0, *)) {
+        if (scene) {
             window = [[UIWindow alloc] initWithWindowScene:scene];
             window.frame = scene.coordinateSpace.bounds;
         } else {
+            FLLog(@"show: сцены нет, пробуем initWithFrame");
             window = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
         }
         window.windowLevel = UIWindowLevelAlert + 10000.0;
@@ -688,6 +756,8 @@ static void FLShowLock(void) {
         gLockViewController = controller;
         gFakeLocked = YES;
         gShowing = NO;
+
+        FLLog(@"show: окно создано (scene=%@, окно=%@)", scene ? @"да" : @"нет", window);
     });
 }
 
@@ -699,9 +769,11 @@ static void FLHideLock(BOOL unlockDevice) {
         gFakeLocked = NO;
 
         if (!window) {
+            FLLog(@"hide: окна нет");
             return;
         }
 
+        FLLog(@"hide: прячем окно (unlock=%d)", unlockDevice);
         [UIView animateWithDuration:0.30 animations:^{
             window.alpha = 0.0;
         } completion:^(BOOL finished) {
@@ -740,6 +812,29 @@ static void FLHideLock(BOOL unlockDevice) {
 
 - (void)lockUIFromSource:(int)source withOptions:(id)options {
     %orig;
+    FLLog(@"hook: lockUIFromSource:%d", source);
+    FLShowLock();
+}
+
+- (void)lockUIFromSource:(int)source withOptions:(id)options completion:(id)completion {
+    %orig;
+    FLLog(@"hook: lockUIFromSource:%d completion", source);
+    FLShowLock();
+}
+
+- (void)lockScreenViewControllerDidPresent {
+    %orig;
+    FLLog(@"hook: lockScreenViewControllerDidPresent");
+    FLShowLock();
+}
+
+%end
+
+%hook SBBacklightController
+
+- (void)_startFadeOutAnimationFromLockSource:(int)source {
+    %orig;
+    FLLog(@"hook: backlight fadeOut:%d", source);
     FLShowLock();
 }
 
@@ -749,13 +844,35 @@ static void FLHideLock(BOOL unlockDevice) {
 
 %ctor {
     @autoreleasepool {
-        NSLog(@"[FakePass13] загружен");
+        FLLog(@"=== FakePass13 загружен (ctor) ===");
+        FLLog(@"конфиг: %@", FLConfig());
 
         if (FLConfigBool(@"lockOnRespring", NO)) {
+            FLLog(@"lockOnRespring=YES, показываем замок через 3с");
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)),
                            dispatch_get_main_queue(), ^{
                 FLShowLock();
             });
         }
+
+        static int prefsToken = 0;
+        notify_register_dispatch("com.mell.fakepass13/prefs-changed",
+                                 &prefsToken,
+                                 dispatch_get_main_queue(),
+                                 ^(int token) {
+            FLLog(@"настройки изменены из Настроек");
+            if (!FLConfigBool(@"enabled", YES)) {
+                FLHideLock(NO);
+            }
+        });
+
+        static int lockNowToken = 0;
+        notify_register_dispatch("com.mell.fakepass13/lock-now",
+                                 &lockNowToken,
+                                 dispatch_get_main_queue(),
+                                 ^(int token) {
+            FLLog(@"команда «заблокировать сейчас» из Настроек");
+            FLShowLock();
+        });
     }
 }

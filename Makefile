@@ -1,7 +1,7 @@
 TARGET := iphone:clang:latest:13.0
-ARCHS = arm64 arm64e
+ARCHS = arm64
 
-INSTALL_TARGET_PROCESSES = SpringBoard
+INSTALL_TARGET_PROCESSES = SpringBoard Preferences
 
 include $(THEOS)/makefiles/common.mk
 
@@ -12,3 +12,6 @@ FakePass13_CFLAGS = -fobjc-arc -Wno-deprecated-declarations -Wno-unused-variable
 FakePass13_FRAMEWORKS = UIKit QuartzCore AudioToolbox
 
 include $(THEOS_MAKE_PATH)/tweak.mk
+
+SUBPROJECTS += prefs
+include $(THEOS_MAKE_PATH)/aggregate.mk

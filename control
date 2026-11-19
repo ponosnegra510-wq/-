@@ -1,10 +1,10 @@
 Package: com.mell.fakepass13
 Name: FakePass13
-Version: 1.0.0
+Version: 1.2.0
 Architecture: iphoneos-arm
 Description: Fake passcode lock screen for iOS 13. Draws its own lock screen with a keypad on top of the system lock screen, for devices where the real passcode / Face ID does not work (broken SEP after a downgrade).
 Maintainer: mell
 Author: mell
 Section: Tweaks
-Depends: firmware (>= 13.0), firmware (<< 14.0)
+Depends: firmware (>= 13.0), firmware (<< 14.0), preferenceloader
 Tag: purpose::extension

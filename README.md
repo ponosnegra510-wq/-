@@ -19,7 +19,9 @@
 * при верном коде гасит окно и дёргает системную разблокировку
   (`SBLockScreenManager -lockScreenViewControllerRequestsUnlock`);
 * при неверном — трясёт экран, показывает «Неверный код-пароль» и включает паузы
-  после 5/6/7/8/10 попыток (30 с → 5 мин).
+  после 5/6/7/8/10 попыток (30 с → 5 мин);
+* имеет панель в **Настройках** (Настройки → FakePass13): включение, смена кода,
+  авто-блокировка после respring и кнопка «Заблокировать сейчас» для проверки.
 
 ## Чего НЕ делает (специально)
 
@@ -45,35 +47,51 @@
    либо открыть `.deb` в Filza.
 3. Respring (после установки он и так будет).
 
+Панель в Настройках требует **PreferenceLoader** (в пакете прописан в `Depends`,
+на большинстве джейлбрейков уже стоит). Если менеджер пакетов ругается на
+неудовлетворённую зависимость — поставь PreferenceLoader из репозитория вручную.
+
+Сам твик работает и без плагина: тогда настройки берутся из старого файла
+`/Library/Preferences/com.mell.fakepass13.plist`.
+
 ## Настройка
 
-Файл: `/Library/Preferences/com.mell.fakepass13.plist`
+Всё настраивается в **Настройки → FakePass13** (панель на базе PreferenceLoader):
 
-```xml
-<key>passcode</key>       <string>1234</string>   <!-- твой код, 4–8 цифр -->
-<key>lockOnRespring</key> <false/>                <!-- блокироваться сразу после respring -->
-```
+* **Включено** — главный выключатель твика;
+* **Код-пароль** — нажми на строку, введи 4–8 цифр (в строке показывается текущий код);
+* **Показывать после respring** — блокироваться автоматически через 3 секунды после
+  перезагрузки SpringBoard;
+* **Заблокировать сейчас** — проверить замок без respring: экран появится сразу;
+* **Сбросить код на 1234** — аварийный сброс.
 
-Редактируется в Filza (открыть как Property List / текст). После правки — respring.
+Настройки хранятся в `NSUserDefaults` с доменом `com.mell.fakepass13`
+(файл `/var/mobile/Library/Preferences/com.mell.fakepass13.plist`).
 
-> **Важно:** по умолчанию `lockOnRespring = false`. Это сделано, чтобы после установки
-> ты не оказался заперт на экране, код от которого ещё не проверил. Сначала убедись,
-> что код работает (см. ниже), и только потом включай `true`.
+Старый файл `/Library/Preferences/com.mell.fakepass13.plist` тоже читается как
+запасной вариант, но значения из Настроек имеют приоритет. Его можно не трогать.
+
+> **Важно:** по умолчанию «Показывать после respring» выключено. Это сделано, чтобы
+> после установки ты не оказался заперт на экране, код от которого ещё не проверил.
+> Сначала нажми «Заблокировать сейчас», убедись, что код подходит, и только потом
+> включай авто-блокировку.
 
 ### Как проверить
 
-1. Оставь `lockOnRespring = false`, сделай respring.
-2. Нажми кнопку питания (экран выключится), затем включи — должен появиться замок.
-3. Введи код из plist — телефон разблокируется.
-4. Если всё ок — поставь `lockOnRespring = true` и сделай respring.
+1. Настройки → FakePass13 → «Заблокировать сейчас».
+2. Должен появиться замок с часами и клавиатурой.
+3. Введи свой код — экран закроется.
+4. Если всё ок — включи «Показывать после respring» и сделай respring.
 
 ## Если залочился и код не помнишь
 
 1. Перезагрузка → джейлбрейк **без загрузки твиков**
-   (в unc0ver выключи `Load Tweaks`), затем Filza → поправь/удали
+   (в unc0ver выключи `Load Tweaks`), затем Filza → удали
+   `/var/mobile/Library/Preferences/com.mell.fakepass13.plist` и/или
    `/Library/Preferences/com.mell.fakepass13.plist` → перезагрузись и включи твики.
-2. Либо по SSH: `rm /Library/Preferences/com.mell.fakepass13.plist`.
+2. Либо по SSH: `rm /var/mobile/Library/Preferences/com.mell.fakepass13.plist`.
 3. Либо Safe Mode (в unc0ver: удержание кнопки громкости вверх во время respring).
+4. Либо удали пакет `com.mell.fakepass13` из Cydia/Zebra (Sileo умеет и в Safe Mode).
 
 Данные при этом не теряются — твик ничего не стирает.
 
@@ -125,12 +143,36 @@ make package FINALPACKAGE=1
 ## Файлы
 
 ```
-Tweak.xm                     — весь код (UI + хук)
+Tweak.xm                     — весь код твика (UI + хуки + лог)
 FakePass13.plist             — фильтр: только com.apple.springboard
 Makefile / control           — Theos-пакет
-layout/Library/Preferences/  — дефолтный конфиг (код 1234)
+prefs/                       — панель настроек (PreferenceLoader bundle)
+  FakePass13RootListController.m
+  Resources/Info.plist
+layout/Library/PreferenceLoader/Preferences/FakePass13.plist — пункт в Настройках
+layout/Library/Preferences/  — дефолтный конфиг (код 1234, запасной вариант)
 .github/workflows/build.yml  — сборка .deb в облаке
 ```
+
+## Если что-то не работает
+
+Твик пишет лог в первый доступный файл:
+
+* `/tmp/fakepass13.log`
+* `/var/mobile/Library/Caches/fakepass13.log`
+* `/var/mobile/Library/Preferences/fakepass13.log`
+* `/var/mobile/Documents/fakepass13.log`
+
+Что там искать:
+
+* `=== FakePass13 загружен (ctor) ===` — dylib загрузился в SpringBoard;
+* `конфиг: {...}` — прочитался ли `passcode` / `lockOnRespring`;
+* `hook: lockUIFromSource:...` — срабатывает ли триггер блокировки;
+* `команда «заблокировать сейчас» из Настроек` — кнопка проверки дошла до SpringBoard;
+* `show: окно создано ...` — создалось ли окно замка.
+
+Если файла нет вообще — твик не инжектится (проверять джейлбрейк/`Load Tweaks`,
+а не код).
 
 ## Ограничения / нюансы
 
