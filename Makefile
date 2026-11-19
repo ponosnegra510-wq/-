@@ -1,17 +1,14 @@
-TARGET := iphone:clang:latest:13.0
-ARCHS = arm64
-
-INSTALL_TARGET_PROCESSES = SpringBoard Preferences
-
 include $(THEOS)/makefiles/common.mk
 
-TWEAK_NAME = FakePass13
+BUNDLE_NAME = FakePass13Prefs
 
-FakePass13_FILES = Tweak.xm
-FakePass13_CFLAGS = -fobjc-arc -Wno-deprecated-declarations -Wno-unused-variable
-FakePass13_FRAMEWORKS = UIKit QuartzCore AudioToolbox
+FakePass13Prefs_FILES = FakePass13RootListController.m
+FakePass13Prefs_FRAMEWORKS = UIKit
+FakePass13Prefs_CFLAGS = -fobjc-arc -Wno-deprecated-declarations
+# Preferences.framework есть только на устройстве, в SDK нет .tbd —
+# поэтому не линкуемся с ним, классы PSListController/PSSpecifier
+# подхватываются в рантайме из процесса Preferences.
+FakePass13Prefs_LDFLAGS = -Wl,-undefined,dynamic_lookup
+FakePass13Prefs_INSTALL_PATH = /Library/PreferenceBundles
 
-include $(THEOS_MAKE_PATH)/tweak.mk
-
-SUBPROJECTS += prefs
-include $(THEOS_MAKE_PATH)/aggregate.mk
+include $(THEOS_MAKE_PATH)/bundle.mk
